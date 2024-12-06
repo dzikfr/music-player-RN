@@ -1,8 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { View, FlatList, Text, Image, StyleSheet, Dimensions } from 'react-native';
-import { Provider as PaperProvider, IconButton, Card } from 'react-native-paper';
-import * as MediaLibrary from 'expo-media-library';
-import { Audio } from 'expo-av';
+import React, { useState, useEffect } from "react";
+import {
+  View,
+  FlatList,
+  Text,
+  Image,
+  StyleSheet,
+  TextInput,
+} from "react-native";
+import { Provider as PaperProvider, IconButton } from "react-native-paper";
+import * as MediaLibrary from "expo-media-library";
+import { Audio } from "expo-av";
+import Slider from "@react-native-community/slider";
 
 export default function App() {
   const [hasPermission, setHasPermission] = useState(false);
@@ -10,36 +18,75 @@ export default function App() {
   const [sound, setSound] = useState<any>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentSong, setCurrentSong] = useState<any>(null);
+  const [duration, setDuration] = useState(0);
+  const [position, setPosition] = useState(0);
+  const [filteredMusicFiles, setFilteredMusicFiles] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Request permission for media access
   const getPermission = async () => {
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
+      setHasPermission(status === "granted");
     } catch (error) {
-      console.error('Error getting permissions', error);
+      console.error("Error getting permissions", error);
     }
   };
 
-  // Fetch MP3 files from the media library
   const getMusicFiles = async () => {
-    const media = await MediaLibrary.getAssetsAsync({ mediaType: 'audio' });
-    const mp3Files = media.assets.filter((asset) => asset.uri.endsWith('.mp3'));
+    const media = await MediaLibrary.getAssetsAsync({ mediaType: "audio" });
+    const mp3Files = media.assets.filter((asset) => asset.uri.endsWith(".mp3"));
     setMusicFiles(mp3Files);
+    setFilteredMusicFiles(mp3Files);
   };
 
-  // Play music
-  const playMusic = async (uri: string, title: string, artist: string) => {
-    if (sound) {
-      await sound.stopAsync();
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    if (query) {
+      const filtered = musicFiles.filter((file) =>
+        file.filename.toLowerCase().includes(query.toLowerCase())
+      );
+      setFilteredMusicFiles(filtered);
+    } else {
+      setFilteredMusicFiles(musicFiles); 
     }
-    const { sound: newSound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
-    setSound(newSound);
-    setIsPlaying(true);
-    setCurrentSong({ uri, title, artist });
   };
 
-  // Toggle play/pause
+  const playMusic = async (uri: string, title: string) => {
+    if (sound) {
+      await sound.unloadAsync(); 
+    }
+    try {
+      const { sound: newSound, status } = await Audio.Sound.createAsync(
+        { uri },
+        { shouldPlay: true },
+        updatePosition
+      );
+
+      if (status.isLoaded) {
+        setSound(newSound);
+        setDuration(status.durationMillis || 0);
+        setIsPlaying(true);
+        setCurrentSong({ uri, title });
+      } else {
+        console.error("Sound status not loaded");
+      }
+
+      newSound.setOnPlaybackStatusUpdate(async (status) => {
+        if (
+          status.isLoaded &&
+          status.positionMillis === status.durationMillis
+        ) {
+          // Cari lagu berikutnya dan putar
+          const currentIndex = musicFiles.findIndex((file) => file.uri === uri);
+          const nextSong = musicFiles[currentIndex + 1] || musicFiles[0];
+          playMusic(nextSong.uri, nextSong.filename);
+        }
+      });
+    } catch (error) {
+      console.error("Error playing music:", error);
+    }
+  };
+
   const togglePauseResume = async () => {
     if (sound) {
       if (isPlaying) {
@@ -47,17 +94,33 @@ export default function App() {
         setIsPlaying(false);
       } else {
         await sound.playAsync();
-        setIsPlaying(true);
+        setIsPlaying(true); 
       }
     }
   };
 
-  // Stop music
   const stopMusic = async () => {
     if (sound) {
       await sound.stopAsync();
       setIsPlaying(false);
-      setCurrentSong(null);
+      setPosition(0);
+    }
+  };
+
+  const updatePosition = async () => {
+    if (sound) {
+      const status = await sound.getStatusAsync();
+      if (status.isLoaded) {
+        setPosition(status.positionMillis);
+        setDuration(status.durationMillis);
+      }
+    }
+  };
+
+  const seek = async (value: number) => {
+    if (sound) {
+      await sound.setPositionAsync(value);
+      setPosition(value);
     }
   };
 
@@ -71,54 +134,92 @@ export default function App() {
     }
   }, [hasPermission]);
 
+  useEffect(() => {
+    const interval = setInterval(updatePosition, 1000);
+    return () => clearInterval(interval);
+  }, [sound]);
+
+  const formatTime = (timeMillis: number) => {
+    const minutes = Math.floor(timeMillis / 60000);
+    const seconds = Math.floor((timeMillis % 60000) / 1000);
+    return `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
+  };
+
   return (
     <PaperProvider>
       <View style={styles.container}>
+        <View style={styles.header}>
+          <TextInput
+            placeholder="Search"
+            style={styles.searchInput}
+            placeholderTextColor="#AAA"
+            value={searchQuery}
+            onChangeText={handleSearch}
+          />
+          <IconButton icon="menu" size={28} />
+        </View>
+
         {hasPermission ? (
           <FlatList
-            data={musicFiles}
+            data={filteredMusicFiles}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <Card style={styles.card}>
-                <Card.Content style={styles.cardContent}>
-                  <View style={styles.albumContainer}>
-                    <Image source={require('./assets/blank-cover.png')} style={styles.albumCover} />
-                  </View>
-                  <View style={styles.songInfoContainer}>
-                    <Text style={styles.songTitle}>{item.title}</Text>
-                    <Text style={styles.artistName}>{item.artist || 'Unknown Artist'}</Text>
-                  </View>
-                  <IconButton
-                    icon={isPlaying && currentSong?.uri === item.uri ? 'pause' : 'play'}
-                    size={35}
-                    onPress={() => playMusic(item.uri, item.filename, 'Unknown Artist')}
-                    style={styles.playPauseButton}
-                  />
-                </Card.Content>
-              </Card>
+              <View style={styles.songCard}>
+                <Image
+                  source={require("./assets/blank-cover.png")}
+                  style={styles.albumCover}
+                />
+                <View style={styles.songInfo}>
+                  <Text style={styles.songTitle}>
+                    {item.filename
+                      ? item.filename.replace(".mp3", "")
+                      : "Unknown Title"}
+                  </Text>
+                  <Text style={styles.artistName}>
+                    {item.artist || "Unknown Artist"}
+                  </Text>
+                </View>
+                <IconButton
+                  icon={
+                    isPlaying && currentSong?.uri === item.uri
+                      ? "pause"
+                      : "play"
+                  }
+                  size={28}
+                  onPress={() => playMusic(item.uri, item.filename)}
+                />
+              </View>
             )}
           />
         ) : (
-          <Text style={styles.permissionText}>Permission is required to access media</Text>
+          <Text style={styles.permissionText}>
+            Permission is required to access media
+          </Text>
         )}
 
         {isPlaying && currentSong && (
-          <View style={styles.nowPlayingContainer}>
-            <Text style={styles.nowPlayingText}>Now Playing: {currentSong.title}</Text>
-            <Text style={styles.artistName}>Artist: {currentSong.artist}</Text>
+          <View style={styles.nowPlayingBar}>
+            <Text style={styles.nowPlayingText}>{currentSong.title.replace(".mp3", "")}</Text>
+            <Slider
+              style={styles.progressBar}
+              value={position}
+              minimumValue={0}
+              maximumValue={duration}
+              onSlidingComplete={seek}
+              minimumTrackTintColor="#1DB954"
+              maximumTrackTintColor="#666"
+            />
+            <View style={styles.timeContainer}>
+              <Text style={styles.timeText}>{formatTime(position)}</Text>
+              <Text style={styles.timeText}>{formatTime(duration)}</Text>
+            </View>
             <View style={styles.controlsContainer}>
               <IconButton
-                icon="pause"
-                size={50}
+                icon={isPlaying ? "pause" : "play"}
+                size={28}
                 onPress={togglePauseResume}
-                style={styles.controlButton}
               />
-              <IconButton
-                icon="stop"
-                size={50}
-                onPress={stopMusic}
-                style={styles.controlButton}
-              />
+              <IconButton icon="stop" size={28} onPress={stopMusic} />
             </View>
           </View>
         )}
@@ -130,78 +231,81 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 50,
+    backgroundColor: "#121212",
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 20,
-    backgroundColor: '#1E1E1E', // Dark background for a sleek look
+    paddingVertical: 10,
+    marginTop: 30,
+    backgroundColor: "#1F1F1F",
   },
-  card: {
-    marginBottom: 20,
-    flexDirection: 'row',
-    backgroundColor: '#2C2C2C',
-    borderRadius: 15,
+  searchInput: {
+    flex: 1,
+    backgroundColor: "#333",
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    color: "#FFF",
+    marginRight: 10,
+  },
+  songCard: {
+    flexDirection: "row",
+    alignItems: "center",
     padding: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 6,
-    height: 120,
-  },
-  cardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  albumContainer: {
-    marginRight: 20,
+    marginVertical: 5,
+    backgroundColor: "#1E1E1E",
+    borderRadius: 10,
+    marginHorizontal: 10,
   },
   albumCover: {
-    width: 60,
-    height: 60,
-    backgroundColor: '#555',
-    borderRadius: 15,
+    width: 50,
+    height: 50,
+    borderRadius: 5,
+    marginRight: 15,
   },
-  songInfoContainer: {
+  songInfo: {
     flex: 1,
   },
   songTitle: {
+    color: "#FFF",
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#FFF',
-    marginBottom: 5,
+    fontWeight: "bold",
   },
   artistName: {
+    color: "#AAA",
     fontSize: 14,
-    color: '#AAA',
-  },
-  playPauseButton: {
-    marginLeft: 10,
   },
   permissionText: {
-    fontSize: 16,
-    color: '#FFF',
-    textAlign: 'center',
+    color: "#FFF",
+    textAlign: "center",
     marginTop: 50,
   },
-  nowPlayingContainer: {
-    alignItems: 'center',
-    marginTop: 30,
-    backgroundColor: '#222',
-    paddingVertical: 20,
-    borderRadius: 12,
-    marginHorizontal: 30,
+  nowPlayingBar: {
+    padding: 15,
+    backgroundColor: "#1F1F1F",
   },
   nowPlayingText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#FFF',
-    marginBottom: 10,
+    color: "#FFF",
+    fontSize: 16,
+    marginBottom: 5,
+  },
+  progressBar: {
+    width: "100%",
+    height: 40,
+  },
+  timeContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginVertical: 5,
+  },
+  timeText: {
+    color: "#FFF",
+    fontSize: 12,
   },
   controlsContainer: {
-    flexDirection: 'row',
-    marginTop: 15,
-    justifyContent: 'center',
-  },
-  controlButton: {
-    marginHorizontal: 20,
+    flexDirection: "row",
+    justifyContent: "center",
   },
 });

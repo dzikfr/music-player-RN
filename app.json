@@ -2,10 +2,14 @@
   "expo": {
     "name": "Music Player App",
     "slug": "music-player-app",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "sdkVersion": "52.0.0",
+    "icon": "./assets/blank-cover.png",
     "splash": {
       "image": "./assets/icon.png",
       "resizeMode": "contain",
@@ -28,7 +32,14 @@
           "apiKey": "YOUR_GOOGLE_MAPS_API_KEY"
         }
       },
-      "permissions": ["READ_EXTERNAL_STORAGE"]
+      "permissions": [
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "c46df555-7287-49c5-9ec4-f1c726832b9b"
+      }
     }
   }
 }
